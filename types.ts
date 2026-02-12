@@ -28,3 +28,15 @@ export interface StoredSession {
   logs: LogMessage[];
   policySummary?: string; // Optional short descriptor
 }
+
+export type SupportedLanguage = 'en' | 'hi' | 'gu' | 'ml' | 'mr' | 'te' | 'ta';
+
+export const LANGUAGES: { id: SupportedLanguage; label: string; nativeName: string }[] = [
+  { id: 'en', label: 'English', nativeName: 'English' },
+  { id: 'hi', label: 'Hindi', nativeName: 'हिन्दी' },
+  { id: 'gu', label: 'Gujarati', nativeName: 'ગુજરાતી' },
+  { id: 'mr', label: 'Marathi', nativeName: 'मराठी' },
+  { id: 'ml', label: 'Malayalam', nativeName: 'മലയാളം' },
+  { id: 'te', label: 'Telugu', nativeName: 'తెలుగు' },
+  { id: 'ta', label: 'Tamil', nativeName: 'தமிழ்' },
+];

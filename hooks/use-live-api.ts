@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
-import { ConnectionState, LogMessage } from '../types';
+import { ConnectionState, LogMessage, SupportedLanguage, LANGUAGES } from '../types';
 import { createPcmBlob, decodeAudioData, base64ToUint8Array } from '../utils/audio-utils';
-import { MODEL_NAME, SYSTEM_INSTRUCTION_PREFIX } from '../constants';
+import { MODEL_NAME, getSystemInstruction } from '../constants';
 
 interface UseLiveApiProps {
   policyContext: string;
+  language: SupportedLanguage;
 }
 
-export function useLiveApi({ policyContext }: UseLiveApiProps) {
+export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
   const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
   const [logs, setLogs] = useState<LogMessage[]>([]);
   const [isMicMuted, setIsMicMuted] = useState(false);
@@ -19,8 +20,9 @@ export function useLiveApi({ policyContext }: UseLiveApiProps) {
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   
-  // Analyzer for visuals - Exposed via Ref to avoid state re-renders
-  const analyzerRef = useRef<AnalyserNode | null>(null);
+  // Analyzers
+  const userAnalyzerRef = useRef<AnalyserNode | null>(null);
+  const agentAnalyzerRef = useRef<AnalyserNode | null>(null);
 
   // Auto-reconnect state
   const isIntentionalDisconnect = useRef<boolean>(false);
@@ -46,7 +48,8 @@ export function useLiveApi({ policyContext }: UseLiveApiProps) {
         try { source.stop(); } catch(e) {}
     });
     sourcesRef.current.clear();
-    analyzerRef.current = null;
+    userAnalyzerRef.current = null;
+    agentAnalyzerRef.current = null;
   };
 
   const disconnect = useCallback(async (intentional: boolean = true) => {
@@ -72,9 +75,6 @@ export function useLiveApi({ policyContext }: UseLiveApiProps) {
     if (intentional) {
         setConnectionState(ConnectionState.DISCONNECTED);
         addLog('system', 'Disconnected from agent.');
-    } else {
-        // If not intentional, we might be in RECONNECTING state already or ERROR
-        // The caller (onError/onClose) handles state setting
     }
   }, []);
 
@@ -84,7 +84,6 @@ export function useLiveApi({ policyContext }: UseLiveApiProps) {
       return;
     }
 
-    // If it's a new connection (not a retry), reset retry count and intentional flag
     if (!isRetry) {
         isIntentionalDisconnect.current = false;
         retryCountRef.current = 0;
@@ -100,21 +99,28 @@ export function useLiveApi({ policyContext }: UseLiveApiProps) {
       inputContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
 
-      // Setup Analyzer for visualizer
-      const analyzer = audioContextRef.current.createAnalyser();
-      analyzer.fftSize = 256;
-      analyzerRef.current = analyzer;
+      // Setup Agent Analyzer (Output)
+      const agentAnalyzer = audioContextRef.current.createAnalyser();
+      agentAnalyzer.fftSize = 256;
+      agentAnalyzerRef.current = agentAnalyzer;
       
       const outputGain = audioContextRef.current.createGain();
-      outputGain.connect(analyzer);
-      analyzer.connect(audioContextRef.current.destination);
+      outputGain.connect(agentAnalyzer);
+      agentAnalyzer.connect(audioContextRef.current.destination);
 
-      // Start Input Stream
+      // Start Input Stream & User Analyzer
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const source = inputContextRef.current.createMediaStreamSource(stream);
       
-      // OPTIMIZATION: Reduce buffer size to 2048 (approx 128ms latency) from 4096 (256ms)
+      const userAnalyzer = inputContextRef.current.createAnalyser();
+      userAnalyzer.fftSize = 256;
+      userAnalyzerRef.current = userAnalyzer;
+      
+      source.connect(userAnalyzer); // Connect mic to analyzer
+
+      // OPTIMIZATION: Reduce buffer size
       const scriptProcessor = inputContextRef.current.createScriptProcessor(2048, 1, 1);
+      userAnalyzer.connect(scriptProcessor); // Connect analyzer to processor
       
       scriptProcessor.onaudioprocess = (e) => {
         if (isMicMutedRef.current) return;
@@ -124,25 +130,22 @@ export function useLiveApi({ policyContext }: UseLiveApiProps) {
         
         if (sessionPromiseRef.current) {
           sessionPromiseRef.current.then(session => {
-             // Only send if connected
              session.sendRealtimeInput({ media: pcmBlob });
-          }).catch(err => {
-              // Ignore send errors during reconnection
-          });
+          }).catch(err => { /* Ignore */ });
         }
       };
 
-      source.connect(scriptProcessor);
       scriptProcessor.connect(inputContextRef.current.destination);
 
       // Establish Connection
+      const selectedLangObj = LANGUAGES.find(l => l.id === language) || LANGUAGES[0];
       const config = {
         model: MODEL_NAME,
         responseModalities: [Modality.AUDIO],
         speechConfig: {
           voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
         },
-        systemInstruction: SYSTEM_INSTRUCTION_PREFIX + policyContext,
+        systemInstruction: getSystemInstruction(policyContext, selectedLangObj.nativeName),
       };
 
       const sessionPromise = ai.live.connect({
@@ -151,9 +154,18 @@ export function useLiveApi({ policyContext }: UseLiveApiProps) {
         callbacks: {
           onopen: () => {
             setConnectionState(ConnectionState.CONNECTED);
-            addLog('system', 'Connected! Start speaking.');
+            addLog('system', 'Connected! Agent entering chat...');
             nextStartTimeRef.current = audioContextRef.current?.currentTime || 0;
-            retryCountRef.current = 0; // Reset retries on success
+            retryCountRef.current = 0;
+            
+            // Trigger initial greeting with language context
+            setTimeout(() => {
+                sessionPromiseRef.current?.then(session => {
+                    session.sendRealtimeInput({
+                        parts: [{ text: `(System: The user has connected. Immediately greet them in ${selectedLangObj.nativeName} and ask how you can help.)` }]
+                    });
+                });
+            }, 200); // Slight delay to ensure readiness
           },
           onmessage: async (message: LiveServerMessage) => {
             // Handle Audio
@@ -214,14 +226,11 @@ export function useLiveApi({ policyContext }: UseLiveApiProps) {
 
       sessionPromiseRef.current = sessionPromise;
 
-      // Note: We removed the visualizer loop from here to avoid re-rendering the component 60fps via setState.
-      // The visualizer component will now access analyzerRef directly.
-
     } catch (error) {
       console.error("Connection failed", error);
       handleReconnect();
     }
-  }, [policyContext]);
+  }, [policyContext, language]);
 
   const handleReconnect = useCallback(() => {
      if (isIntentionalDisconnect.current) return;
@@ -238,13 +247,12 @@ export function useLiveApi({ policyContext }: UseLiveApiProps) {
          }, delay);
      } else {
          setConnectionState(ConnectionState.ERROR);
-         addLog('system', 'Unable to reconnect after multiple attempts. Please try again later.');
-         disconnect(true); // Final cleanup
+         addLog('system', 'Unable to reconnect after multiple attempts.');
+         disconnect(true);
      }
   }, [connect, disconnect]);
 
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       disconnect(true);
@@ -264,6 +272,7 @@ export function useLiveApi({ policyContext }: UseLiveApiProps) {
     isMicMuted,
     setIsMicMuted,
     isMicMutedRef,
-    analyzerRef // Expose the ref directly
+    userAnalyzerRef,
+    agentAnalyzerRef
   };
 }

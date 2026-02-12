@@ -1,13 +1,18 @@
 import React, { useRef, useEffect } from 'react';
 
 interface AudioVisualizerProps {
-  // Use a RefObject to access the analyser, or pass the AnalyserNode directly.
-  // Passing the RefObject allows us to access the current value even if it changes without re-render of parent.
-  analyzerRef: React.MutableRefObject<AnalyserNode | null>;
+  userAnalyzerRef: React.MutableRefObject<AnalyserNode | null>;
+  agentAnalyzerRef: React.MutableRefObject<AnalyserNode | null>;
   isActive: boolean;
+  isConnecting: boolean;
 }
 
-export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ analyzerRef, isActive }) => {
+export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ 
+  userAnalyzerRef, 
+  agentAnalyzerRef, 
+  isActive, 
+  isConnecting 
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -16,83 +21,100 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ analyzerRef, i
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    // Handle high-DPI displays for crisp lines
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    // Determine logical width/height for drawing
+    const width = rect.width;
+    const height = rect.height;
+
     let animationId: number;
-    const dataArray = new Uint8Array(256); // Fits FFT size 256
+    const dataArray = new Uint8Array(32); 
+    
+    // Animation state
+    let tick = 0;
+
+    const drawWave = (
+      color: string, 
+      volume: number, 
+      frequency: number, 
+      offset: number, 
+      amplitudeMultiplier: number
+    ) => {
+       ctx.beginPath();
+       ctx.moveTo(0, height / 2);
+       
+       // Draw sine wave
+       for (let x = 0; x < width; x++) {
+         // Formula: y = Center + Amplitude * sin(Frequency * x + MovingPhase)
+         // Volume determines amplitude.
+         const baseAmp = isActive ? (volume * amplitudeMultiplier) : 5; // minimal movement when idle
+         const y = height / 2 + Math.sin(x * frequency + tick * 0.05 + offset) * baseAmp;
+         ctx.lineTo(x, y);
+       }
+       
+       ctx.strokeStyle = color;
+       ctx.lineWidth = 2;
+       ctx.lineCap = 'round';
+       ctx.lineJoin = 'round';
+       ctx.stroke();
+    };
 
     const draw = () => {
-      const width = canvas.width;
-      const height = canvas.height;
       ctx.clearRect(0, 0, width, height);
 
-      let volume = 0;
+      // Get Volumes
+      let agentVol = 0;
+      let userVol = 0;
 
-      // Calculate volume directly from the ref
-      if (isActive && analyzerRef.current) {
-        try {
-            analyzerRef.current.getByteFrequencyData(dataArray);
-            const sum = dataArray.reduce((a, b) => a + b, 0);
-            const avg = sum / dataArray.length;
-            volume = avg;
-        } catch (e) {
-            // Analyser might be disconnected
-        }
+      if (agentAnalyzerRef.current && isActive) {
+        agentAnalyzerRef.current.getByteFrequencyData(dataArray);
+        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+        agentVol = avg;
       }
 
-      if (!isActive || volume === 0) {
-        // Draw a flat line
-        ctx.beginPath();
-        ctx.moveTo(0, height / 2);
-        ctx.lineTo(width, height / 2);
-        ctx.strokeStyle = '#334155'; // Slate 700
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        
-        // Keep animating even if idle to smoothly transition? No, just stop if not active to save battery.
-        // But we need to keep checking if volume appears (if isActive is true).
-        if(isActive) {
-           animationId = requestAnimationFrame(draw);
-        }
-        return;
+      if (userAnalyzerRef.current && isActive) {
+        userAnalyzerRef.current.getByteFrequencyData(dataArray);
+        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+        userVol = avg;
       }
 
-      // Draw wave based on volume
-      // Normalize volume (0-255) to a scale factor
-      const scale = Math.min(volume / 50, 1.5); 
-      
-      ctx.beginPath();
-      ctx.moveTo(0, height / 2);
-
-      for (let i = 0; i < width; i++) {
-        // Create a sine wave that moves and scales with volume
-        const frequency = 0.1;
-        const amplitude = 20 * scale;
-        const y = height / 2 + Math.sin(i * frequency + Date.now() / 100) * amplitude;
-        ctx.lineTo(i, y);
+      // If connecting, simulate a "thinking" pulse
+      if (isConnecting) {
+         const pulse = (Math.sin(tick * 0.1) + 1) * 10;
+         agentVol = 10 + pulse; 
       }
 
-      const gradient = ctx.createLinearGradient(0, 0, width, 0);
-      gradient.addColorStop(0, '#3b82f6'); // Blue 500
-      gradient.addColorStop(0.5, '#8b5cf6'); // Violet 500
-      gradient.addColorStop(1, '#ec4899'); // Pink 500
+      // Draw Agent Waves (Blue/Violet)
+      // 3 overlapping waves for depth
+      drawWave('rgba(59, 130, 246, 0.3)', agentVol, 0.01, 0, 0.8); // Blue 500 low opacity
+      drawWave('rgba(139, 92, 246, 0.5)', agentVol, 0.02, 2, 0.6); // Violet 500 mid opacity
+      drawWave('rgba(59, 130, 246, 1.0)', agentVol, 0.015, 4, 1.0); // Blue 500 main line
 
-      ctx.strokeStyle = gradient;
-      ctx.lineWidth = 3;
-      ctx.stroke();
+      // Draw User Waves (Green/Teal) - Only if user is speaking loud enough
+      if (userVol > 5) {
+        drawWave('rgba(52, 211, 153, 0.4)', userVol, 0.02, 1, 0.7); // Emerald 400
+        drawWave('rgba(45, 212, 191, 1.0)', userVol, 0.025, 3, 0.9); // Teal 400
+      }
 
+      tick++;
       animationId = requestAnimationFrame(draw);
     };
 
     draw();
 
     return () => cancelAnimationFrame(animationId);
-  }, [isActive, analyzerRef]); // Dependencies
+  }, [isActive, isConnecting, userAnalyzerRef, agentAnalyzerRef]);
 
   return (
     <canvas 
       ref={canvasRef} 
-      width={600} 
-      height={100} 
-      className="w-full h-24 rounded-lg bg-slate-900 border border-slate-800"
+      className="w-full h-full absolute inset-0 rounded-xl"
+      // CSS handles sizing, JS handles internal resolution
+      style={{ width: '100%', height: '100%' }}
     />
   );
 };
