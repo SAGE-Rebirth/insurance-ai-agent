@@ -26,7 +26,7 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
 
   // Auto-reconnect state
   const isIntentionalDisconnect = useRef<boolean>(false);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<any>(null);
   const retryCountRef = useRef(0);
   const MAX_RETRIES = 5;
 
@@ -146,6 +146,8 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
           voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
         },
         systemInstruction: getSystemInstruction(policyContext, selectedLangObj.nativeName),
+        inputAudioTranscription: {},
+        outputAudioTranscription: {}
       };
 
       const sessionPromise = ai.live.connect({
@@ -191,6 +193,48 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
                } catch (error) {
                  console.error("Error decoding/playing audio", error);
                }
+            }
+
+            // Handle Transcriptions (User & Agent)
+            const outputText = message.serverContent?.outputTranscription?.text;
+            const inputText = message.serverContent?.inputTranscription?.text;
+
+            if (outputText || inputText) {
+                setLogs(prev => {
+                    const newLogs = [...prev];
+                    const lastLog = newLogs[newLogs.length - 1];
+                    
+                    if (outputText) {
+                         if (lastLog && lastLog.role === 'agent') {
+                             newLogs[newLogs.length - 1] = { 
+                                 ...lastLog, 
+                                 message: lastLog.message + outputText 
+                             };
+                         } else {
+                             newLogs.push({
+                                 timestamp: new Date(),
+                                 role: 'agent',
+                                 message: outputText
+                             });
+                         }
+                    }
+
+                    if (inputText) {
+                        if (lastLog && lastLog.role === 'user') {
+                             newLogs[newLogs.length - 1] = { 
+                                 ...lastLog, 
+                                 message: lastLog.message + inputText 
+                             };
+                        } else {
+                             newLogs.push({
+                                 timestamp: new Date(),
+                                 role: 'user',
+                                 message: inputText
+                             });
+                        }
+                    }
+                    return newLogs;
+                });
             }
             
             if (message.serverContent?.interrupted) {

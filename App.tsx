@@ -145,7 +145,7 @@ const App: React.FC = () => {
                 </div>
                 <div>
                 <h1 className="text-xl font-bold text-white tracking-tight">InsureVoice AI</h1>
-                <p className="text-[10px] text-blue-400 font-semibold uppercase tracking-widest">Powered by Gemini</p>
+                <p className="text-[10px] text-blue-400 font-semibold uppercase tracking-widest">Powered by PushpakO2</p>
                 </div>
             </div>
             

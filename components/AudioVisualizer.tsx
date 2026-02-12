@@ -27,14 +27,13 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
     ctx.scale(dpr, dpr);
-    // Determine logical width/height for drawing
+    
     const width = rect.width;
     const height = rect.height;
 
     let animationId: number;
     const dataArray = new Uint8Array(32); 
     
-    // Animation state
     let tick = 0;
 
     const drawWave = (
@@ -47,11 +46,8 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
        ctx.beginPath();
        ctx.moveTo(0, height / 2);
        
-       // Draw sine wave
        for (let x = 0; x < width; x++) {
-         // Formula: y = Center + Amplitude * sin(Frequency * x + MovingPhase)
-         // Volume determines amplitude.
-         const baseAmp = isActive ? (volume * amplitudeMultiplier) : 5; // minimal movement when idle
+         const baseAmp = isActive ? (volume * amplitudeMultiplier) : 5; 
          const y = height / 2 + Math.sin(x * frequency + tick * 0.05 + offset) * baseAmp;
          ctx.lineTo(x, y);
        }
@@ -66,7 +62,6 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
     const draw = () => {
       ctx.clearRect(0, 0, width, height);
 
-      // Get Volumes
       let agentVol = 0;
       let userVol = 0;
 
@@ -88,16 +83,15 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
          agentVol = 10 + pulse; 
       }
 
-      // Draw Agent Waves (Blue/Violet)
-      // 3 overlapping waves for depth
-      drawWave('rgba(59, 130, 246, 0.3)', agentVol, 0.01, 0, 0.8); // Blue 500 low opacity
-      drawWave('rgba(139, 92, 246, 0.5)', agentVol, 0.02, 2, 0.6); // Violet 500 mid opacity
-      drawWave('rgba(59, 130, 246, 1.0)', agentVol, 0.015, 4, 1.0); // Blue 500 main line
+      // Draw Agent Waves (Blue/Violet) - Main focus
+      drawWave('rgba(59, 130, 246, 0.3)', agentVol, 0.01, 0, 0.8);
+      drawWave('rgba(139, 92, 246, 0.5)', agentVol, 0.02, 2, 0.6);
+      drawWave('rgba(59, 130, 246, 1.0)', agentVol, 0.015, 4, 1.0);
 
-      // Draw User Waves (Green/Teal) - Only if user is speaking loud enough
+      // Draw User Waves (Green/Teal) - Reacts to user input
       if (userVol > 5) {
-        drawWave('rgba(52, 211, 153, 0.4)', userVol, 0.02, 1, 0.7); // Emerald 400
-        drawWave('rgba(45, 212, 191, 1.0)', userVol, 0.025, 3, 0.9); // Teal 400
+        drawWave('rgba(52, 211, 153, 0.4)', userVol, 0.02, 1, 0.7); 
+        drawWave('rgba(45, 212, 191, 1.0)', userVol, 0.025, 3, 0.9);
       }
 
       tick++;
@@ -113,7 +107,6 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({
     <canvas 
       ref={canvasRef} 
       className="w-full h-full absolute inset-0 rounded-xl"
-      // CSS handles sizing, JS handles internal resolution
       style={{ width: '100%', height: '100%' }}
     />
   );
