@@ -74,7 +74,7 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
 
     if (intentional) {
         setConnectionState(ConnectionState.DISCONNECTED);
-        addLog('system', 'Disconnected from agent.');
+        setLogs([]); // Clear logs on intentional disconnect
     }
   }, []);
 
@@ -87,6 +87,7 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
     if (!isRetry) {
         isIntentionalDisconnect.current = false;
         retryCountRef.current = 0;
+        setLogs([]); // Clear logs on new connection start
     }
 
     setConnectionState(isRetry ? ConnectionState.RECONNECTING : ConnectionState.CONNECTING);
