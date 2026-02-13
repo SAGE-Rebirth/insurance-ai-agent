@@ -262,7 +262,7 @@ const App: React.FC = () => {
                      )}
                      {isConnected && (
                         <div className="inline-flex flex-col items-center animate-fade-in-up">
-                            <h2 className="text-2xl font-bold text-white tracking-tight drop-shadow-md">Agent Alex</h2>
+                            <h2 className="text-2xl font-bold text-white tracking-tight drop-shadow-md">Agent Sathi</h2>
                             <p className="text-blue-300 text-sm font-medium opacity-80">Listening ({LANGUAGES.find(l => l.id === selectedLanguage)?.label})...</p>
                         </div>
                      )}
