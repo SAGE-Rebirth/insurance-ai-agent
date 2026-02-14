@@ -17,16 +17,24 @@ const App: React.FC = () => {
   const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>('en');
 
   useEffect(() => {
-    if (!process.env.API_KEY) {
+    // Check for API key safely
+    if (typeof process !== 'undefined' && process.env && !process.env.API_KEY) {
       setApiKeyMissing(true);
     }
     
     const stored = localStorage.getItem('insure_voice_history');
     if (stored) {
         try {
-            setSessionHistory(JSON.parse(stored));
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed)) {
+                setSessionHistory(parsed);
+            } else {
+                console.warn("Stored history is not an array, resetting.");
+                localStorage.removeItem('insure_voice_history');
+            }
         } catch (e) {
             console.error("Failed to parse history", e);
+            localStorage.removeItem('insure_voice_history');
         }
     }
   }, []);
@@ -53,7 +61,7 @@ const App: React.FC = () => {
 
   // Function to generate summary using standard GenerateContent
   const generateSessionSummary = async (sessionLogs: any[]): Promise<string> => {
-      if (!process.env.API_KEY || sessionLogs.length < 2) return "No sufficient conversation to summarize.";
+      if (typeof process === 'undefined' || !process.env.API_KEY || sessionLogs.length < 2) return "No sufficient conversation to summarize.";
       
       try {
           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -64,7 +72,7 @@ const App: React.FC = () => {
             .join('\n');
             
           const response = await ai.models.generateContent({
-              model: 'gemini-2.5-flash',
+              model: 'gemini-3-flash-preview',
               contents: `Summarize the following insurance agent conversation in 2-3 concise sentences:\n\n${transcript}`
           });
           
@@ -113,8 +121,6 @@ const App: React.FC = () => {
   };
 
   const handleClearHistory = () => {
-      // Removed confirm() as it can be blocked by sandboxes. 
-      // Direct action for smoother UX.
       setSessionHistory([]);
       localStorage.removeItem('insure_voice_history');
   }

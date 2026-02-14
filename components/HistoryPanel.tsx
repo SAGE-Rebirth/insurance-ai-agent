@@ -9,6 +9,19 @@ interface HistoryPanelProps {
 }
 
 export const HistoryPanel: React.FC<HistoryPanelProps> = ({ sessions, onClose, onClearHistory }) => {
+  // Ensure sessions is an array before rendering
+  const safeSessions = Array.isArray(sessions) ? sessions : [];
+
+  const formatDate = (isoString: string) => {
+    try {
+      const date = new Date(isoString);
+      if (isNaN(date.getTime())) return 'Unknown Date';
+      return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    } catch (e) {
+      return 'Unknown Date';
+    }
+  };
+
   return (
     <div className="fixed inset-y-0 right-0 w-full md:w-[450px] bg-slate-900 border-l border-slate-700 shadow-2xl z-50 flex flex-col transform transition-transform duration-300 ease-in-out">
       <div className="p-4 border-b border-slate-700 flex items-center justify-between bg-slate-900/80 backdrop-blur-sm">
@@ -25,18 +38,20 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({ sessions, onClose, o
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
-        {sessions.length === 0 ? (
+        {safeSessions.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-slate-500">
             <MessageSquare className="w-12 h-12 mb-4 opacity-20" />
             <p className="text-sm">No past conversations found.</p>
           </div>
         ) : (
-          sessions.map((session) => (
+          safeSessions.map((session) => (
             <div key={session.id} className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-4 space-y-3 hover:bg-slate-800 transition-colors">
               <div className="flex items-center justify-between text-xs text-slate-400 pb-2 border-b border-slate-700/50">
-                <span className="font-medium text-slate-300">{new Date(session.timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                <span className="font-medium text-slate-300">
+                    {formatDate(session.timestamp)}
+                </span>
                 <span className="bg-slate-700/50 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wide text-slate-300">
-                  {session.logs.filter(l => l.role !== 'system').length} turns
+                  {(session.logs || []).filter(l => l.role !== 'system').length} turns
                 </span>
               </div>
               
@@ -55,7 +70,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({ sessions, onClose, o
 
               {/* Transcript Preview */}
               <div className="max-h-32 overflow-y-auto text-sm space-y-2 pr-2 scrollbar-thin opacity-70 hover:opacity-100 transition-opacity">
-                {session.logs.filter(l => l.role !== 'system').slice(0, 3).map((log, idx) => (
+                {(session.logs || []).filter(l => l.role !== 'system').slice(0, 3).map((log, idx) => (
                   <div key={idx} className="flex gap-2">
                     <span className={`font-bold text-[10px] uppercase w-10 shrink-0 mt-0.5 ${
                       log.role === 'agent' ? 'text-blue-400' : 'text-emerald-400'
@@ -71,7 +86,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({ sessions, onClose, o
         )}
       </div>
 
-      {sessions.length > 0 && (
+      {safeSessions.length > 0 && (
         <div className="p-4 border-t border-slate-700 bg-slate-900/80 backdrop-blur-sm">
           <button
             onClick={onClearHistory}
