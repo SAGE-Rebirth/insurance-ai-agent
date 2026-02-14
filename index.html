@@ -28,21 +28,25 @@
       }
     </style>
     <script>
-      // Polyfill process for environments that expect it (like the SDK usage of process.env.API_KEY)
+      // Polyfill process for environments that expect it
       if (typeof process === "undefined") {
         window.process = { env: {} };
+      } else if (!process.env) {
+        process.env = {};
       }
     </script>
   <script type="importmap">
 {
   "imports": {
-    "lucide-react": "https://esm.sh/lucide-react@0.263.1",
-    "react-dom/": "https://esm.sh/react-dom@18.3.1/",
-    "react/": "https://esm.sh/react@18.3.1/",
     "react": "https://esm.sh/react@18.3.1",
+    "react/": "https://esm.sh/react@18.3.1/",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+    "react-dom": "https://esm.sh/react-dom@18.3.1",
+    "lucide-react": "https://esm.sh/lucide-react@0.263.1",
     "@google/genai": "https://esm.sh/@google/genai@0.1.2",
     "pdfjs-dist": "https://esm.sh/pdfjs-dist@3.11.174",
-    "pdfjs-dist/": "https://esm.sh/pdfjs-dist@3.11.174/"
+    "pdfjs-dist/": "https://esm.sh/pdfjs-dist@3.11.174/",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/"
   }
 }
 </script>

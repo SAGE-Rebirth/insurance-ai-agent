@@ -36,11 +36,11 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
 
   const cleanupAudioContexts = () => {
     if (inputContextRef.current) {
-        inputContextRef.current.close();
+        try { inputContextRef.current.close(); } catch (e) { /* ignore */ }
         inputContextRef.current = null;
     }
     if (audioContextRef.current) {
-        audioContextRef.current.close();
+        try { audioContextRef.current.close(); } catch (e) { /* ignore */ }
         audioContextRef.current = null;
     }
     // Stop all playing sources
@@ -97,8 +97,15 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
       // Initialize Audio Contexts
-      inputContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      try {
+        inputContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      } catch (e) {
+        console.error("AudioContext initialization failed", e);
+        setConnectionState(ConnectionState.ERROR);
+        addLog('system', 'Error: Could not initialize audio. Please check browser permissions.');
+        return;
+      }
 
       // Setup Agent Analyzer (Output)
       const agentAnalyzer = audioContextRef.current.createAnalyser();
@@ -158,7 +165,9 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
           onopen: () => {
             setConnectionState(ConnectionState.CONNECTED);
             addLog('system', 'Connected! Agent entering chat...');
-            nextStartTimeRef.current = audioContextRef.current?.currentTime || 0;
+            if (audioContextRef.current) {
+                nextStartTimeRef.current = audioContextRef.current.currentTime || 0;
+            }
             retryCountRef.current = 0;
             
             // Trigger initial greeting with language context
