@@ -144,7 +144,7 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
         model: MODEL_NAME,
         responseModalities: [Modality.AUDIO],
         speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Callirrhoe' } },
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }, //Callirrhoe //Zephyr
         },
         systemInstruction: getSystemInstruction(policyContext, selectedLangObj.nativeName),
         inputAudioTranscription: {},
