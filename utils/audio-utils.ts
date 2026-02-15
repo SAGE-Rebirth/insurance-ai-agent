@@ -1,8 +1,4 @@
-
-export interface PcmBlob {
-  data: string;
-  mimeType: string;
-}
+import { Blob } from '@google/genai';
 
 export function base64ToUint8Array(base64: string): Uint8Array {
   const binaryString = atob(base64);
@@ -33,7 +29,7 @@ export function float32ToPCM16(float32Array: Float32Array): Int16Array {
   return int16Array;
 }
 
-export function createPcmBlob(data: Float32Array): PcmBlob {
+export function createPcmBlob(data: Float32Array): Blob {
   const pcm16 = float32ToPCM16(data);
   const uint8 = new Uint8Array(pcm16.buffer);
   return {

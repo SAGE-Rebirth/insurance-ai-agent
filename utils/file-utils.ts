@@ -1,4 +1,3 @@
-
 export async function parseFile(file: File): Promise<string> {
   const extension = file.name.split('.').pop()?.toLowerCase();
 
@@ -16,9 +15,9 @@ async function parsePdf(file: File): Promise<string> {
   const pdfjsLib = await import('pdfjs-dist');
   const pdfjs: any = (pdfjsLib as any).default || pdfjsLib;
 
-  // Set worker source to a stable CDN to ensure worker loads correctly
+  // Set worker source for PDF.js dynamically
   if (pdfjs.GlobalWorkerOptions && !pdfjs.GlobalWorkerOptions.workerSrc) {
-    pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    pdfjs.GlobalWorkerOptions.workerSrc = 'https://esm.sh/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
   }
 
   const arrayBuffer = await file.arrayBuffer();
