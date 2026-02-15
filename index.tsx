@@ -1,20 +1,31 @@
-import React from 'react';
+import React, { Component, ReactNode } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+
+console.log("Starting InsureVoice AI Application...");
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
   throw new Error("Could not find root element to mount to");
 }
 
+interface Props {
+  children: ReactNode;
+}
+
+interface State {
+  hasError: boolean;
+  error: any;
+}
+
 // Simple Error Boundary to catch startup errors
-class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error: any}> {
-  constructor(props: any) {
+class ErrorBoundary extends Component<Props, State> {
+  constructor(props: Props) {
     super(props);
     this.state = { hasError: false, error: null };
   }
 
-  static getDerivedStateFromError(error: any) {
+  static getDerivedStateFromError(error: any): State {
     return { hasError: true, error };
   }
 
