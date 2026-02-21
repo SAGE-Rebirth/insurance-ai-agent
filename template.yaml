@@ -1,0 +1,361 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: InsureVoice AI Agent — Serverless Infrastructure
+
+# ─── Global Lambda defaults ───────────────────────────────────────────────────
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Architectures: [arm64]          # Graviton2 — 20% cheaper, faster cold starts
+    MemorySize: 256
+    Timeout: 30
+    Environment:
+      Variables:
+        SECRET_NAME: !Ref SecretName
+        CORS_ORIGIN: !Ref CorsOrigin
+        SQS_QUEUE_URL: !Ref SummaryQueue
+        NODE_OPTIONS: '--enable-source-maps'
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+    AllowedValues: [dev, staging, prod]
+
+  SecretName:
+    Type: String
+    Description: AWS Secrets Manager secret name containing MONGODB_URI, REDIS_URL, GEMINI_API_KEY
+    Default: insurevoice/production
+
+  CorsOrigin:
+    Type: String
+    Description: Allowed CORS origin (your CloudFront domain)
+    Default: '*'
+
+  FrontendBucketName:
+    Type: String
+    Default: insurevoice-frontend
+
+# ─── Resources ────────────────────────────────────────────────────────────────
+Resources:
+
+  # ═══════════════════════════════════════════════════════════
+  # SQS: FIFO Queue for async summary generation + Dead-Letter Queue
+  # ═══════════════════════════════════════════════════════════
+  SummaryDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${Stage}-insurevoice-summary-dlq.fifo'
+      FifoQueue: true
+      MessageRetentionPeriod: 1209600  # 14 days
+
+  SummaryQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${Stage}-insurevoice-summary.fifo'
+      FifoQueue: true
+      ContentBasedDeduplication: true
+      VisibilityTimeout: 60            # Must be >= Lambda timeout
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt SummaryDLQ.Arn
+        maxReceiveCount: 3             # Retry 3 times before moving to DLQ
+
+  # ═══════════════════════════════════════════════════════════
+  # API Gateway HTTP API (v2) — cheaper and faster than REST API
+  # ═══════════════════════════════════════════════════════════
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Stage
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref CorsOrigin
+        AllowMethods: [GET, POST, DELETE, OPTIONS]
+        AllowHeaders: [Content-Type, Authorization]
+        MaxAge: 600
+
+  # ═══════════════════════════════════════════════════════════
+  # Lambda: Sessions CRUD
+  # ═══════════════════════════════════════════════════════════
+  SessionsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Stage}-insurevoice-sessions'
+      CodeUri: lambda/sessions/
+      Handler: handler.handler
+      Description: Sessions CRUD with Redis caching and SQS enqueue
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SecretName}*'
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt SummaryQueue.QueueName
+      Events:
+        GetSessions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/sessions
+            Method: GET
+        PostSession:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/sessions
+            Method: POST
+        DeleteAllSessions:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/sessions
+            Method: DELETE
+        DeleteSession:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/sessions/{id}
+            Method: DELETE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2020
+        Sourcemap: false
+        EntryPoints: [handler.ts]
+        External: [mongoose]          # Exclude large deps — bundled via layer
+
+  # ═══════════════════════════════════════════════════════════
+  # Lambda: Policies CRUD
+  # ═══════════════════════════════════════════════════════════
+  PoliciesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Stage}-insurevoice-policies'
+      CodeUri: lambda/policies/
+      Handler: handler.handler
+      Description: Policies CRUD with Redis caching
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SecretName}*'
+      Events:
+        GetPolicies:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/policies
+            Method: GET
+        GetPolicy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/policies/{id}
+            Method: GET
+        PostPolicy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/policies
+            Method: POST
+        DeletePolicy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /api/policies/{id}
+            Method: DELETE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2020
+        Sourcemap: false
+        EntryPoints: [handler.ts]
+        External: [mongoose]
+
+  # ═══════════════════════════════════════════════════════════
+  # Lambda: Health Check
+  # ═══════════════════════════════════════════════════════════
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Stage}-insurevoice-health'
+      CodeUri: lambda/health/
+      Handler: handler.handler
+      Description: Health check endpoint
+      MemorySize: 128               # Tiny — just connectivity checks
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SecretName}*'
+      Events:
+        Health:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /health
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2020
+        Sourcemap: false
+        EntryPoints: [handler.ts]
+        External: [mongoose]
+
+  # ═══════════════════════════════════════════════════════════
+  # Lambda: Async Summary Generator (SQS Consumer)
+  # ═══════════════════════════════════════════════════════════
+  SummaryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${Stage}-insurevoice-summary'
+      CodeUri: lambda/summary/
+      Handler: handler.handler
+      Description: Async AI summary generator triggered by SQS
+      MemorySize: 512               # Needs more memory for Gemini HTTP calls
+      Timeout: 60                   # Gemini API can be slow
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SecretName}*'
+        - SQSPollerPolicy:
+            QueueName: !GetAtt SummaryQueue.QueueName
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt SummaryQueue.Arn
+            BatchSize: 1              # Process one at a time for reliability
+            FunctionResponseTypes:
+              - ReportBatchItemFailures  # Partial batch success
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2020
+        Sourcemap: false
+        EntryPoints: [handler.ts]
+        External: [mongoose]
+
+  # ═══════════════════════════════════════════════════════════
+  # S3: Frontend Static Hosting
+  # ═══════════════════════════════════════════════════════════
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref FrontendBucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true  # Private — only CloudFront can access
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowCloudFrontOAC
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                'AWS:SourceArn': !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
+
+  # ═══════════════════════════════════════════════════════════
+  # CloudFront Distribution — CDN + HTTPS + SPA + API routing
+  # ═══════════════════════════════════════════════════════════
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${Stage}-insurevoice-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub 'InsureVoice AI (${Stage})'
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100   # US, CA, EU, AP — cheapest global coverage
+
+        Origins:
+          # S3 origin for React app
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+            S3OriginConfig: {}
+
+          # API Gateway origin for backend calls
+          - Id: ApiGwOrigin
+            DomainName: !Sub '${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+            CustomOriginConfig:
+              HTTPSPort: 443
+              OriginProtocolPolicy: https-only
+
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+          AllowedMethods: [GET, HEAD]
+
+        CacheBehaviors:
+          # /api/* → API Gateway (no caching at CloudFront level)
+          - PathPattern: /api/*
+            TargetOriginId: ApiGwOrigin
+            ViewerProtocolPolicy: https-only
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac  # AllViewer
+
+          # /health → API Gateway
+          - PathPattern: /health
+            TargetOriginId: ApiGwOrigin
+            ViewerProtocolPolicy: https-only
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad  # CachingDisabled
+            AllowedMethods: [GET, HEAD]
+
+          # JS/CSS assets — long cache (Vite hashes filenames)
+          - PathPattern: /assets/*
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6  # CachingOptimized
+
+        # SPA fallback: 403/404 from S3 → serve index.html
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+
+# ─── Outputs ──────────────────────────────────────────────────────────────────
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway HTTP API endpoint
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+
+  CloudFrontUrl:
+    Description: CloudFront distribution URL (your app URL)
+    Value: !Sub 'https://${CloudFrontDistribution.DomainName}'
+
+  FrontendBucketName:
+    Description: S3 bucket for frontend deployment
+    Value: !Ref FrontendBucket
+
+  SummaryQueueUrl:
+    Description: SQS summary queue URL
+    Value: !Ref SummaryQueue
+
+  SummaryDLQUrl:
+    Description: Dead-letter queue URL (check this for failed summaries)
+    Value: !Ref SummaryDLQ

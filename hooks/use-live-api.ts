@@ -19,7 +19,7 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
   const nextStartTimeRef = useRef<number>(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
-  
+
   // Analyzers
   const userAnalyzerRef = useRef<AnalyserNode | null>(null);
   const agentAnalyzerRef = useRef<AnalyserNode | null>(null);
@@ -36,16 +36,16 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
 
   const cleanupAudioContexts = () => {
     if (inputContextRef.current) {
-        inputContextRef.current.close();
-        inputContextRef.current = null;
+      inputContextRef.current.close();
+      inputContextRef.current = null;
     }
     if (audioContextRef.current) {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
+      audioContextRef.current.close();
+      audioContextRef.current = null;
     }
     // Stop all playing sources
     sourcesRef.current.forEach(source => {
-        try { source.stop(); } catch(e) {}
+      try { source.stop(); } catch (e) { }
     });
     sourcesRef.current.clear();
     userAnalyzerRef.current = null;
@@ -54,10 +54,10 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
 
   const disconnect = useCallback(async (intentional: boolean = true) => {
     isIntentionalDisconnect.current = intentional;
-    
+
     if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
     }
 
     if (sessionPromiseRef.current) {
@@ -73,28 +73,28 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
     cleanupAudioContexts();
 
     if (intentional) {
-        setConnectionState(ConnectionState.DISCONNECTED);
-        setLogs([]); // Clear logs on intentional disconnect
+      setConnectionState(ConnectionState.DISCONNECTED);
+      setLogs([]); // Clear logs on intentional disconnect
     }
   }, []);
 
   const connect = useCallback(async (isRetry: boolean = false) => {
-    if (!process.env.API_KEY) {
-      alert("API_KEY not found in environment variables.");
+    if (!import.meta.env.VITE_API_KEY) {
+      alert("VITE_API_KEY not found in environment variables.");
       return;
     }
 
     if (!isRetry) {
-        isIntentionalDisconnect.current = false;
-        retryCountRef.current = 0;
-        setLogs([]); // Clear logs on new connection start
+      isIntentionalDisconnect.current = false;
+      retryCountRef.current = 0;
+      setLogs([]); // Clear logs on new connection start
     }
 
     setConnectionState(isRetry ? ConnectionState.RECONNECTING : ConnectionState.CONNECTING);
     addLog('system', isRetry ? `Attempting to reconnect (${retryCountRef.current + 1}/${MAX_RETRIES})...` : 'Connecting to Gemini Live API...');
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
 
       // Initialize Audio Contexts
       inputContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
@@ -104,7 +104,7 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
       const agentAnalyzer = audioContextRef.current.createAnalyser();
       agentAnalyzer.fftSize = 256;
       agentAnalyzerRef.current = agentAnalyzer;
-      
+
       const outputGain = audioContextRef.current.createGain();
       outputGain.connect(agentAnalyzer);
       agentAnalyzer.connect(audioContextRef.current.destination);
@@ -112,26 +112,26 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
       // Start Input Stream & User Analyzer
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const source = inputContextRef.current.createMediaStreamSource(stream);
-      
+
       const userAnalyzer = inputContextRef.current.createAnalyser();
       userAnalyzer.fftSize = 256;
       userAnalyzerRef.current = userAnalyzer;
-      
+
       source.connect(userAnalyzer); // Connect mic to analyzer
 
       // OPTIMIZATION: Reduce buffer size
       const scriptProcessor = inputContextRef.current.createScriptProcessor(2048, 1, 1);
       userAnalyzer.connect(scriptProcessor); // Connect analyzer to processor
-      
+
       scriptProcessor.onaudioprocess = (e) => {
         if (isMicMutedRef.current) return;
-        
+
         const inputData = e.inputBuffer.getChannelData(0);
         const pcmBlob = createPcmBlob(inputData);
-        
+
         if (sessionPromiseRef.current) {
           sessionPromiseRef.current.then(session => {
-             session.sendRealtimeInput({ media: pcmBlob });
+            session.sendRealtimeInput({ media: pcmBlob });
           }).catch(err => { /* Ignore */ });
         }
       };
@@ -160,40 +160,40 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
             addLog('system', 'Connected! Agent entering chat...');
             nextStartTimeRef.current = audioContextRef.current?.currentTime || 0;
             retryCountRef.current = 0;
-            
+
             // Trigger initial greeting with language context
             setTimeout(() => {
-                sessionPromiseRef.current?.then(session => {
-                    session.sendRealtimeInput({
-                        parts: [{ text: `(System: The user has connected. Immediately greet them in ${selectedLangObj.nativeName} and ask how you can help.)` }]
-                    });
+              sessionPromiseRef.current?.then(session => {
+                session.sendRealtimeInput({
+                  parts: [{ text: `(System: The user has connected. Immediately greet them in ${selectedLangObj.nativeName} and ask how you can help.)` }]
                 });
+              });
             }, 200); // Slight delay to ensure readiness
           },
           onmessage: async (message: LiveServerMessage) => {
             // Handle Audio
             const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (base64Audio && audioContextRef.current) {
-               try {
-                  const ctx = audioContextRef.current;
-                  const audioBytes = base64ToUint8Array(base64Audio);
-                  const audioBuffer = await decodeAudioData(audioBytes, ctx);
-                  
-                  const now = ctx.currentTime;
-                  nextStartTimeRef.current = Math.max(nextStartTimeRef.current, now);
-                  
-                  const source = ctx.createBufferSource();
-                  source.buffer = audioBuffer;
-                  source.connect(outputGain);
-                  
-                  source.start(nextStartTimeRef.current);
-                  nextStartTimeRef.current += audioBuffer.duration;
-                  
-                  sourcesRef.current.add(source);
-                  source.onended = () => sourcesRef.current.delete(source);
-               } catch (error) {
-                 console.error("Error decoding/playing audio", error);
-               }
+              try {
+                const ctx = audioContextRef.current;
+                const audioBytes = base64ToUint8Array(base64Audio);
+                const audioBuffer = await decodeAudioData(audioBytes, ctx);
+
+                const now = ctx.currentTime;
+                nextStartTimeRef.current = Math.max(nextStartTimeRef.current, now);
+
+                const source = ctx.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(outputGain);
+
+                source.start(nextStartTimeRef.current);
+                nextStartTimeRef.current += audioBuffer.duration;
+
+                sourcesRef.current.add(source);
+                source.onended = () => sourcesRef.current.delete(source);
+              } catch (error) {
+                console.error("Error decoding/playing audio", error);
+              }
             }
 
             // Handle Transcriptions (User & Agent)
@@ -201,47 +201,47 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
             const inputText = message.serverContent?.inputTranscription?.text;
 
             if (outputText || inputText) {
-                setLogs(prev => {
-                    const newLogs = [...prev];
-                    const lastLog = newLogs[newLogs.length - 1];
-                    
-                    if (outputText) {
-                         if (lastLog && lastLog.role === 'agent') {
-                             newLogs[newLogs.length - 1] = { 
-                                 ...lastLog, 
-                                 message: lastLog.message + outputText 
-                             };
-                         } else {
-                             newLogs.push({
-                                 timestamp: new Date(),
-                                 role: 'agent',
-                                 message: outputText
-                             });
-                         }
-                    }
+              setLogs(prev => {
+                const newLogs = [...prev];
+                const lastLog = newLogs[newLogs.length - 1];
 
-                    if (inputText) {
-                        if (lastLog && lastLog.role === 'user') {
-                             newLogs[newLogs.length - 1] = { 
-                                 ...lastLog, 
-                                 message: lastLog.message + inputText 
-                             };
-                        } else {
-                             newLogs.push({
-                                 timestamp: new Date(),
-                                 role: 'user',
-                                 message: inputText
-                             });
-                        }
-                    }
-                    return newLogs;
-                });
+                if (outputText) {
+                  if (lastLog && lastLog.role === 'agent') {
+                    newLogs[newLogs.length - 1] = {
+                      ...lastLog,
+                      message: lastLog.message + outputText
+                    };
+                  } else {
+                    newLogs.push({
+                      timestamp: new Date(),
+                      role: 'agent',
+                      message: outputText
+                    });
+                  }
+                }
+
+                if (inputText) {
+                  if (lastLog && lastLog.role === 'user') {
+                    newLogs[newLogs.length - 1] = {
+                      ...lastLog,
+                      message: lastLog.message + inputText
+                    };
+                  } else {
+                    newLogs.push({
+                      timestamp: new Date(),
+                      role: 'user',
+                      message: inputText
+                    });
+                  }
+                }
+                return newLogs;
+              });
             }
-            
+
             if (message.serverContent?.interrupted) {
               addLog('system', 'Agent interrupted.');
               sourcesRef.current.forEach(s => {
-                try { s.stop(); } catch(e){}
+                try { s.stop(); } catch (e) { }
               });
               sourcesRef.current.clear();
               if (audioContextRef.current) {
@@ -251,19 +251,19 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
           },
           onclose: () => {
             if (!isIntentionalDisconnect.current) {
-                 handleReconnect();
+              handleReconnect();
             } else {
-                setConnectionState(ConnectionState.DISCONNECTED);
-                addLog('system', 'Session closed.');
+              setConnectionState(ConnectionState.DISCONNECTED);
+              addLog('system', 'Session closed.');
             }
           },
           onerror: (err) => {
             console.error("Session error:", err);
             if (!isIntentionalDisconnect.current) {
-                handleReconnect();
+              handleReconnect();
             } else {
-                setConnectionState(ConnectionState.ERROR);
-                addLog('system', 'Error occurred.');
+              setConnectionState(ConnectionState.ERROR);
+              addLog('system', 'Error occurred.');
             }
           }
         }
@@ -278,23 +278,23 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
   }, [policyContext, language]);
 
   const handleReconnect = useCallback(() => {
-     if (isIntentionalDisconnect.current) return;
-     
-     if (retryCountRef.current < MAX_RETRIES) {
-         setConnectionState(ConnectionState.RECONNECTING);
-         const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 10000); // Exponential backoff
-         addLog('system', `Connection lost. Reconnecting in ${delay/1000}s...`);
-         
-         reconnectTimeoutRef.current = setTimeout(() => {
-             retryCountRef.current++;
-             cleanupAudioContexts();
-             connect(true);
-         }, delay);
-     } else {
-         setConnectionState(ConnectionState.ERROR);
-         addLog('system', 'Unable to reconnect after multiple attempts.');
-         disconnect(true);
-     }
+    if (isIntentionalDisconnect.current) return;
+
+    if (retryCountRef.current < MAX_RETRIES) {
+      setConnectionState(ConnectionState.RECONNECTING);
+      const delay = Math.min(1000 * Math.pow(2, retryCountRef.current), 10000); // Exponential backoff
+      addLog('system', `Connection lost. Reconnecting in ${delay / 1000}s...`);
+
+      reconnectTimeoutRef.current = setTimeout(() => {
+        retryCountRef.current++;
+        cleanupAudioContexts();
+        connect(true);
+      }, delay);
+    } else {
+      setConnectionState(ConnectionState.ERROR);
+      addLog('system', 'Unable to reconnect after multiple attempts.');
+      disconnect(true);
+    }
   }, [connect, disconnect]);
 
 
@@ -308,7 +308,7 @@ export function useLiveApi({ policyContext, language }: UseLiveApiProps) {
   useEffect(() => {
     isMicMutedRef.current = isMicMuted;
   }, [isMicMuted]);
-  
+
   return {
     connect: () => connect(false),
     disconnect: () => disconnect(true),
