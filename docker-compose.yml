@@ -25,7 +25,7 @@ services:
     container_name: insurevoice-backend
     restart: unless-stopped
     env_file:
-      - ./server/.env
+      - ./.env.local
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379

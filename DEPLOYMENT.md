@@ -45,7 +45,7 @@ aws sts get-caller-identity   # Should show your AWS account
 3. **Network Access** → Add IP `0.0.0.0/0` (Lambda egress IPs are dynamic)
 4. **Connect** → Copy connection string:
    ```
-   mongodb+srv://insurevoice-user:PASSWORD@cluster0.xxxxx.mongodb.net/insurevoice
+   mongodb+srv://insurevoice-user:<enter-your-pass>@cluster0.xxxxx.mongodb.net/insurevoice
    ```
 
 ---
